@@ -19,7 +19,7 @@ Full architecture rationale — scale strategy to 500K+ records, 413/429 handlin
 ```
 .
 ├── README.md
-├── architecture.pdf
+├── architecture.md
 ├── requirements.txt
 ├── .env.example
 └── src/
@@ -64,6 +64,8 @@ python -m src.resolver.resolve       # Entity resolution pass
 python -m src.export.to_sheets       # Push final data to Google Sheet
 ```
 
+The source adapters intentionally return no records until a source is configured; this prevents fabricated output. Use `src.scrapers.base.fetch_many` for bounded async acquisition, validate extracted records with `src.schemas`, pass raw text through `src.llm.LLMOrchestrator`, and resolve names with `src.resolver.EntityResolver`.
+
 ## Architecture Overview
 
 **Scraping layer:** `aiohttp` for static/directory pages, `Playwright (async)` for JavaScript-rendered or anti-bot-protected sources. Concurrency is capped and rate-limited per domain to avoid tripping protections; retries use exponential backoff with jitter.
@@ -96,4 +98,27 @@ Public Google Sheet: `<insert link>`
 
 ## Next Steps for Production Scale
 
-See `architecture.pdf` for the full write-up on scaling to 500,000+ records, including infrastructure scaling strategy, distributed dedup, and storage architecture.
+See [`architecture.md`](./architecture.md) for the design covering 500,000+ records, distributed deduplication, freshness, rate limits, anti-bot handling, and storage.
+
+### Working commands
+
+On Windows PowerShell, run these from the repository root:
+
+```powershell
+python -m pip install -r requirements.txt
+Copy-Item .env.example .env
+python -m unittest discover -s tests -v
+python -m src.main
+python -m src.main --papers 100 --output data/papers.jsonl
+python -m src.export.to_sheets data/papers.jsonl --output-dir data/tabs
+python -m src.scrapers.startups https://your-approved-directory.example/feed.json --type startup --output data/startups.jsonl
+python -m src.scrapers.news_jobs https://your-approved-news-source.example/feed.xml --output data/signals.jsonl
+```
+
+The paper command uses the public Arxiv API and writes only validated, source-linked records. RSS/Atom collection accepts explicit feed URLs, for example:
+
+```powershell
+python -m src.scrapers.news_jobs https://example.com/feed.xml --output data/signals.jsonl
+```
+
+The three LLM clients are activated only for keys present in `.env`; no key is printed or required for local tests. Google Sheets publication requires a separate authenticated exporter and should be run only after reviewing the generated CSV tabs.

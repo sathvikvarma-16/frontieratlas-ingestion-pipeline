@@ -1,0 +1,1 @@
+"""FrontierAtlas ingestion pipeline."""
