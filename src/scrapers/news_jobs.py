@@ -30,7 +30,7 @@ JOB_FEED_URLS = [
 ]
 JOB_PAGE_SIZE = 100
 JOB_PAGE_DELAY_SECONDS = 0.4
-JOB_FRESHNESS_HOURS = 24 * 7
+JOB_FRESHNESS_HOURS = 24
 
 
 def _date(value: str | None, now: datetime) -> datetime | None:
