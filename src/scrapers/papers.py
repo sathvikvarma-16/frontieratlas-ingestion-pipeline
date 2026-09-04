@@ -87,31 +87,43 @@ async def enrich_github_data(
     token = os.getenv("GITHUB_TOKEN")
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    matched = 0
-    for paper in papers:
+    semaphore = asyncio.Semaphore(10)
+
+    async def enrich_one(paper: ResearchPaper) -> bool:
         repository_stars: int | None = None
         identifier = _arxiv_id(str(paper.paper_url))
         try:
-            if identifier and not paper.github_url:
-                async with session.get(PAPERS_WITH_CODE_REPOSITORIES.format(arxiv_id=identifier)) as response:
-                    if response.status == 200:
-                        repository = _pwc_repository(await response.json())
-                        if repository:
-                            paper.github_url, repository_stars = repository
+            async with semaphore:
+                if identifier and not paper.github_url:
+                    pwc_text = await fetch_text(
+                        session,
+                        PAPERS_WITH_CODE_REPOSITORIES.format(arxiv_id=identifier),
+                        headers={"User-Agent": "FrontierAtlas/1.0"},
+                    )
+                    repository = _pwc_repository(json.loads(pwc_text))
+                    if repository:
+                        paper.github_url, repository_stars = repository
             github_url = _github_url(str(paper.github_url)) if paper.github_url else None
             if github_url:
                 paper.github_url = github_url
                 parts = github_url.rstrip("/").split("github.com/")[-1].split("/")
                 if len(parts) == 2:
-                    async with session.get(f"https://api.github.com/repos/{parts[0]}/{parts[1]}", headers=headers) as response:
-                        if response.status == 200:
-                            repository_stars = (await response.json()).get("stargazers_count")
+                    github_text = await fetch_text(
+                        session,
+                        f"https://api.github.com/repos/{parts[0]}/{parts[1]}",
+                        headers=headers,
+                    )
+                    repository_stars = json.loads(github_text).get("stargazers_count")
             if paper.github_url:
-                matched += 1
                 paper.github_stars = repository_stars
+                return True
         except (aiohttp.ClientError, TimeoutError):
-            pass
-        await asyncio.sleep(delay_seconds)
+            return False
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return False
+        return False
+
+    matched = sum(await asyncio.gather(*(enrich_one(paper) for paper in papers)))
     print(f"GitHub enrichment: {matched}/{len(papers)} papers matched to a repository")
 
 

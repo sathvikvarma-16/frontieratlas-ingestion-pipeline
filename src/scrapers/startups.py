@@ -7,6 +7,7 @@ source URL and are never synthesized when a directory omits a field.
 import argparse
 import asyncio
 import json
+import os
 from collections.abc import Iterable
 from html.parser import HTMLParser
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -140,7 +141,12 @@ async def collect_products(
                 page_number += 1
                 await asyncio.sleep(delay_seconds)
 
-    await enrich_entities(products)
+    source_texts: dict[str, str] = {}
+    if products and os.getenv("LLM_ENRICHMENT_ENABLED", "true").lower() in {"1", "true", "yes"}:
+        page_urls = [str(product.website) for product in products if product.website and product.pricing_model is None]
+        if page_urls:
+            source_texts = await fetch_many(page_urls, concurrency=10)
+    await enrich_entities(products, source_texts=source_texts)
     return products[:target]
 
 

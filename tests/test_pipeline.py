@@ -94,12 +94,12 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual((product.company, product.pricing_model), ("Acme Corp", "PAID"))
 
         product.pricing_model = None
-        async def extract_subscription(_: str) -> dict[str, object]:
+        async def extract_unsupported_pricing(_: str) -> dict[str, object]:
             return {"pricing_model": "usage-based"}
 
         with patch.dict("os.environ", {"LLM_ENRICHMENT_ENABLED": "true"}):
-            asyncio.run(enrich_entities([product], orchestrator=LLMOrchestrator([CallableProvider("test", extract_subscription)]), delay_seconds=0))
-        self.assertEqual(product.pricing_model, "USAGE_BASED")
+            asyncio.run(enrich_entities([product], orchestrator=LLMOrchestrator([CallableProvider("test", extract_unsupported_pricing)]), delay_seconds=0))
+        self.assertIsNone(product.pricing_model)
 
     def test_resolver_and_chunks(self) -> None:
         self.assertEqual(EntityResolver(["OpenAI"]).resolve("Open AI, Inc.").canonical_name, "OpenAI")

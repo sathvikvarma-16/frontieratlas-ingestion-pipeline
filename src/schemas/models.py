@@ -58,7 +58,7 @@ class Product(BaseModel):
     company: str | None = None
     description: str | None = None
     website: HttpUrl | None = None
-    pricing_model: Literal["FREE", "FREEMIUM", "PAID", "SUBSCRIPTION", "USAGE_BASED", "ENTERPRISE", "OPEN_SOURCE", "UNKNOWN"] | None = None
+    pricing_model: Literal["FREE", "FREEMIUM", "PAID", "ENTERPRISE"] | None = None
 
 
 class ResearchPaper(BaseModel):

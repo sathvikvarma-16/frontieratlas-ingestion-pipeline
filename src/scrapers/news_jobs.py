@@ -79,6 +79,13 @@ class _MainTextParser:
 
 
 def _article_text(html: str) -> str | None:
+    try:
+        import trafilatura
+        extracted = trafilatura.extract(html, include_comments=False, include_tables=False)
+        if extracted:
+            return " ".join(extracted.split())[:10000]
+    except ImportError:
+        pass
     return _MainTextParser().feed(html)
 
 
@@ -283,14 +290,17 @@ async def collect_typed(feed_urls: list[str], *, record_type: str, now: datetime
                         seen_urls.add(record_url)
                         unique_records.append(record)
                 if record_type == "news":
-                    for record in unique_records:
-                        if not isinstance(record, NewsArticle) or record.summary:
-                            continue
-                        try:
-                            article_html = await fetch_text(session, str(record.article_url))
-                            record.summary = _article_text(article_html) or record.summary
-                        except (aiohttp.ClientError, TimeoutError):
-                            pass
+                    semaphore = asyncio.Semaphore(10)
+
+                    async def enrich_article(record: NewsArticle) -> None:
+                        async with semaphore:
+                            try:
+                                article_html = await fetch_text(session, str(record.article_url), headers={"User-Agent": "FrontierAtlas/1.0"})
+                                record.summary = _article_text(article_html) or record.summary
+                            except (aiohttp.ClientError, TimeoutError):
+                                return
+
+                    await asyncio.gather(*(enrich_article(record) for record in unique_records if isinstance(record, NewsArticle)))
                 records.extend(unique_records)
                 source_total += len(unique_records)
                 print(f"{record_type.title()} source {source_url} page {page_number}: {len(unique_records)} records; running total {len(records)}")

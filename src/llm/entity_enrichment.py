@@ -11,7 +11,7 @@ from .orchestrator import ExtractionError, LLMOrchestrator
 from .http_providers import providers_from_environment
 
 ENRICHMENT_DELAY_SECONDS = 0.4
-PRICING_MODELS = {"FREE", "FREEMIUM", "PAID", "SUBSCRIPTION", "USAGE_BASED", "ENTERPRISE", "OPEN_SOURCE", "UNKNOWN"}
+PRICING_MODELS = {"FREE", "FREEMIUM", "PAID", "ENTERPRISE"}
 
 
 def _source_text(record: Startup | Product) -> str:
@@ -33,7 +33,7 @@ def _instruction(record: Startup | Product) -> str:
     if isinstance(record, Startup):
         fields = "description (short factual company description), employee_count (non-negative integer), headquarters (city and/or country)"
     else:
-        fields = "company (company name), pricing_model (one of free, freemium, subscription, usage-based, enterprise, open-source, unknown)"
+        fields = "company (company name), pricing_model (exactly one of FREE, FREEMIUM, PAID, ENTERPRISE)"
     return (
         "Extract only the following missing structured fields from the source text: " + fields + ". "
         "Return a single JSON object with exactly these keys. Use null when a value is absent, ambiguous, or not explicitly supported. "
@@ -48,7 +48,8 @@ def _usable_value(record: Startup | Product, field: str, value: Any) -> Any:
         if not isinstance(value, str):
             return None
         normalized = value.strip().upper().replace("-", "_").replace(" ", "_")
-        return normalized if normalized in PRICING_MODELS else None
+        aliases = {"FREE": "FREE", "FREEMIUM": "FREEMIUM", "PAID": "PAID", "ENTERPRISE": "ENTERPRISE"}
+        return aliases.get(normalized)
     if field in {"description", "headquarters", "company"}:
         return value.strip() if isinstance(value, str) and value.strip() else None
     return None
@@ -58,6 +59,7 @@ async def enrich_entities(
     records: Sequence[Startup | Product],
     *,
     orchestrator: LLMOrchestrator | None = None,
+    source_texts: dict[str, str] | None = None,
     delay_seconds: float = ENRICHMENT_DELAY_SECONDS,
 ) -> list[Startup | Product]:
     """Fill missing entity fields through the configured provider fallback chain."""
@@ -76,7 +78,14 @@ async def enrich_entities(
         missing = [field for field in field_names if getattr(record, field) in (None, "")]
         if missing:
             try:
-                extracted = await extractor.extract(_instruction(record), _source_text(record))
+                raw_text = source_texts.get(str(record.website), "") if source_texts else ""
+                extracted = await extractor.extract(_instruction(record), f"{_source_text(record)}\nsource page text:\n{raw_text}")
+                if isinstance(extracted, dict) and isinstance(extracted.get("records"), list):
+                    merged: dict[str, Any] = {}
+                    for chunk_result in extracted["records"]:
+                        if isinstance(chunk_result, dict):
+                            merged.update({key: value for key, value in chunk_result.items() if value not in (None, "")})
+                    extracted = merged
                 if not isinstance(extracted, dict):
                     extracted = {}
                 for field in missing:
