@@ -8,9 +8,9 @@ from dotenv import load_dotenv
 from src.database import RecordStore
 from src.export.csv_tabs import export_tabs
 from src.resolver import EntityResolver
-from src.scrapers.news_jobs import collect_typed as collect_signals
+from src.scrapers.news_jobs import JOB_FEED_URLS, collect_typed as collect_signals
 from src.scrapers.papers import collect as collect_papers
-from src.scrapers.startups import collect as collect_entities
+from src.scrapers.startups import collect as collect_entities, collect_products
 from src.storage import append_records
 
 
@@ -24,10 +24,14 @@ async def run(limit: int = 0, output: str = "data/papers.jsonl") -> None:
     for key, entity_type in (("STARTUP_SOURCE_URLS", "startup"), ("PRODUCT_SOURCE_URLS", "product")):
         urls = [url.strip() for url in os.getenv(key, "").split(",") if url.strip()]
         if urls:
-            records.extend(await collect_entities(urls=urls, entity_type=entity_type))
+            if entity_type == "product":
+                records.extend(await collect_products(urls))
+            else:
+                records.extend(await collect_entities(urls=urls, entity_type=entity_type))
     for key, record_type in (("NEWS_FEED_URLS", "news"), ("JOB_FEED_URLS", "job")):
         feed_urls = [url.strip() for url in os.getenv(key, "").split(",") if url.strip()]
-        if feed_urls:
+        if feed_urls or record_type == "job":
+            feed_urls = feed_urls or JOB_FEED_URLS
             records.extend(await collect_signals(feed_urls, record_type=record_type))
     if not records:
         print("No sources configured; no records were generated")

@@ -2,11 +2,10 @@
 
 import csv
 import json
-import os
 from pathlib import Path
 from typing import Any
 
-from src.resolver import EntityResolver
+from src.resolver import EntityResolver, load_canonical_seeds
 
 
 def export_tabs(input_path: str, output_dir: str = "data/tabs") -> int:
@@ -28,7 +27,7 @@ def export_tabs(input_path: str, output_dir: str = "data/tabs") -> int:
         count += len(selected)
     entities = [row for row in rows if row.get("recordType") in {"STARTUP", "PRODUCT"} and row.get("name")]
     if entities:
-        seeds = [name.strip() for name in os.getenv("CANONICAL_ENTITIES", "OpenAI,Anthropic,DeepMind").split(",") if name.strip()]
+        seeds = load_canonical_seeds()
         resolver = EntityResolver(seeds)
         with (destination / "Entity Mapping Log.csv").open("w", newline="", encoding="utf-8") as output:
             writer = csv.DictWriter(output, fieldnames=["record_type", "raw_name", "canonical_name", "score"])

@@ -9,10 +9,19 @@ import asyncio
 import json
 from collections.abc import Iterable
 from html.parser import HTMLParser
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+import aiohttp
+
 from src.schemas import Product, Source, Startup
 from src.storage import append_records
+from src.llm.entity_enrichment import enrich_entities
 
-from .base import fetch_many
+from .base import fetch_many, fetch_text
+
+PRODUCT_TARGET = 1000
+PRODUCT_PAGE_SIZE = 100
+PRODUCT_PAGE_DELAY_SECONDS = 0.4
 
 
 class MetadataParser(HTMLParser):
@@ -74,9 +83,54 @@ def parse_directory_pages(pages: dict[str, str], *, entity_type: str) -> list[St
     return records
 
 
+def _paginated_url(url: str, *, offset: int, limit: int = PRODUCT_PAGE_SIZE) -> str:
+    """Set offset pagination parameters while preserving other source filters."""
+    parsed = urlsplit(url)
+    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    query.update({"limit": str(limit), "offset": str(offset)})
+    return urlunsplit(parsed._replace(query=urlencode(query)))
+
+
+async def collect_products(
+    urls: Iterable[str],
+    *,
+    target: int = PRODUCT_TARGET,
+    page_size: int = PRODUCT_PAGE_SIZE,
+    delay_seconds: float = PRODUCT_PAGE_DELAY_SECONDS,
+) -> list[Product]:
+    """Fetch product directory APIs page by page until the target is reached."""
+    products: list[Product] = []
+    async with aiohttp.ClientSession(headers={"User-Agent": "FrontierAtlas/1.0"}) as session:
+        for source_url in urls:
+            offset = 0
+            page_number = 1
+            while len(products) < target:
+                page_url = _paginated_url(source_url, offset=offset, limit=page_size)
+                print(f"Products page {page_number}: fetching offset {offset}")
+                body = await fetch_text(session, page_url)
+                page_products = parse_directory_pages({source_url: body}, entity_type="product")
+                if not page_products:
+                    print(f"Products page {page_number}: empty page; have {len(products)} products")
+                    break
+
+                products.extend(page_products)
+                print(f"Products page {page_number}: have {len(products)} products so far")
+                if len(products) >= target:
+                    break
+
+                offset += page_size
+                page_number += 1
+                await asyncio.sleep(delay_seconds)
+
+    await enrich_entities(products)
+    return products[:target]
+
+
 async def collect(urls: Iterable[str], *, entity_type: str = "startup") -> list[Startup | Product]:
     pages = await fetch_many(urls)
-    return parse_directory_pages(pages, entity_type=entity_type)
+    records = parse_directory_pages(pages, entity_type=entity_type)
+    await enrich_entities(records)
+    return records
 
 
 if __name__ == "__main__":
@@ -85,6 +139,6 @@ if __name__ == "__main__":
     parser.add_argument("--type", choices=("startup", "product"), default="startup")
     parser.add_argument("--output", default="data/startups.jsonl")
     args = parser.parse_args()
-    records = asyncio.run(collect(args.urls, entity_type=args.type))
+    records = asyncio.run(collect_products(args.urls)) if args.type == "product" else asyncio.run(collect(args.urls, entity_type=args.type))
     append_records(args.output, records)
     print(f"Collected {len(records)} validated {args.type} records into {args.output}")

@@ -15,12 +15,18 @@ from src.storage import append_records
 from .base import fetch_text
 
 ARXIV_API = "https://export.arxiv.org/api/query"
+PAPERS_WITH_CODE_REPOSITORIES = "https://paperswithcode.com/api/v1/papers/{arxiv_id}/repositories/"
 ATOM = "http://www.w3.org/2005/Atom"
 GITHUB_PATTERN = re.compile(r"https?://github\.com/[\w.-]+/[\w.-]+", re.I)
 
 
 def _text(element: ET.Element | None) -> str:
     return " ".join((element.text or "").split()) if element is not None else ""
+
+
+def _arxiv_id(paper_url: str) -> str | None:
+    match = re.search(r"arxiv\.org/(?:abs|pdf)/([\w.-]+)", paper_url, re.I)
+    return match.group(1).removesuffix(".pdf") if match else None
 
 
 def parse_arxiv_feed(xml: str) -> list[ResearchPaper]:
@@ -44,24 +50,66 @@ def parse_arxiv_feed(xml: str) -> list[ResearchPaper]:
     return papers
 
 
-async def enrich_github_stars(session: aiohttp.ClientSession, papers: list[ResearchPaper]) -> None:
-    """Populate current public GitHub star counts when repositories are present."""
+def _github_url(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    match = GITHUB_PATTERN.search(value)
+    return match.group(0).rstrip(".,)/") if match else None
+
+
+def _pwc_repository(payload: object) -> tuple[str, int | None] | None:
+    if not isinstance(payload, dict):
+        return None
+    repositories = payload.get("results") if isinstance(payload.get("results"), list) else payload.get("repositories")
+    if not isinstance(repositories, list):
+        return None
+    for repository in repositories:
+        if not isinstance(repository, dict):
+            continue
+        url = _github_url(repository.get("url") or repository.get("repository_url") or repository.get("github_url"))
+        if url:
+            stars = repository.get("stars") or repository.get("stargazers_count")
+            return url, stars if isinstance(stars, int) else None
+    return None
+
+
+async def enrich_github_data(
+    session: aiohttp.ClientSession,
+    papers: list[ResearchPaper],
+    *,
+    delay_seconds: float = 0.4,
+) -> None:
+    """Use Papers with Code to find repositories, then GitHub for current stars."""
     headers = {"Accept": "application/vnd.github+json"}
     token = os.getenv("GITHUB_TOKEN")
     if token:
         headers["Authorization"] = f"Bearer {token}"
+    matched = 0
     for paper in papers:
-        if not paper.github_url:
-            continue
-        parts = str(paper.github_url).rstrip("/").split("github.com/")[-1].split("/")
-        if len(parts) != 2:
-            continue
+        repository_stars: int | None = None
+        identifier = _arxiv_id(str(paper.paper_url))
         try:
-            async with session.get(f"https://api.github.com/repos/{parts[0]}/{parts[1]}", headers=headers) as response:
-                if response.status == 200:
-                    paper.github_stars = (await response.json()).get("stargazers_count")
+            if identifier and not paper.github_url:
+                async with session.get(PAPERS_WITH_CODE_REPOSITORIES.format(arxiv_id=identifier)) as response:
+                    if response.status == 200:
+                        repository = _pwc_repository(await response.json())
+                        if repository:
+                            paper.github_url, repository_stars = repository
+            github_url = _github_url(str(paper.github_url)) if paper.github_url else None
+            if github_url:
+                paper.github_url = github_url
+                parts = github_url.rstrip("/").split("github.com/")[-1].split("/")
+                if len(parts) == 2:
+                    async with session.get(f"https://api.github.com/repos/{parts[0]}/{parts[1]}", headers=headers) as response:
+                        if response.status == 200:
+                            repository_stars = (await response.json()).get("stargazers_count")
+            if paper.github_url:
+                matched += 1
+                paper.github_stars = repository_stars
         except (aiohttp.ClientError, TimeoutError):
-            continue
+            pass
+        await asyncio.sleep(delay_seconds)
+    print(f"GitHub enrichment: {matched}/{len(papers)} papers matched to a repository")
 
 
 async def collect(query: str = "cat:cs.AI", max_results: int = 100) -> list[ResearchPaper]:
@@ -70,7 +118,7 @@ async def collect(query: str = "cat:cs.AI", max_results: int = 100) -> list[Rese
     async with aiohttp.ClientSession(headers={"User-Agent": "FrontierAtlas/1.0"}) as session:
         feed = await fetch_text(session, url)
         papers = parse_arxiv_feed(feed)
-        await enrich_github_stars(session, papers)
+        await enrich_github_data(session, papers)
     return papers
 
 if __name__ == "__main__":
