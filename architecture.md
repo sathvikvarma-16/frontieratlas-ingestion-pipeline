@@ -53,9 +53,10 @@ The repository currently implements local SQLite persistence and JSONL/CSV expor
 ## Known Limitations
 
 - Some public sources are blocked by Cloudflare or change their feed/API contracts. The jobs collector logs failed sources and continues, but source coverage will vary by network and date.
-- Papers with Code endpoints can be unavailable or redirect. Paper collection still completes, but `github_url` and `github_stars` remain null when no verified repository lookup succeeds.
+- Papers with Code endpoints can be unavailable, redirect, or be rate-limited. The collector uses the official repository mapping response first and then verifies current GitHub stars; fields remain null when no reliable link or GitHub response exists.
 - LLM enrichment requires at least one configured provider key. Without keys, startup/product records retain only fields obtained from the source.
 - Metadata extraction is conservative. Missing or ambiguous company, location, employee, headquarters, or pricing values remain null rather than being inferred.
+- Job adapters accept JSON, RSS, and Atom variants from the configured boards and log zero-record sources for review; a source can still change its contract or block automated requests.
 - The current local pipeline is not a 500k-record distributed deployment; concurrency, queueing, caching, and durable production storage require the scale-up work described above.
 
 ## End-to-End Run

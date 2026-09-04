@@ -11,7 +11,7 @@ The project demonstrates the core engineering problems behind a production data-
 - **Data quality:** Pydantic schemas, conservative null handling, source URLs, normalized timestamps, and freshness filters.
 - **Entity resolution:** Deterministic normalization plus `rapidfuzz` matching against a canonical AI-company seed list.
 - **Operational behavior:** Pagination, bounded concurrency, polite delays, progress logging, and URL deduplication.
-- **Reviewable outputs:** JSONL records, local SQLite persistence, CSV tabs, and optional Google Sheets export.
+- **Reviewable outputs:** JSONL records, local SQLite persistence, and CSV tabs ready for Google Sheets import.
 
 ## Architecture
 
@@ -40,7 +40,7 @@ Public APIs / RSS / directories
               |
               v
        src/export/csv_tabs.py
-       CSV tabs / Google Sheets
+       CSV tabs for Google Sheets import
 ```
 
 The end-to-end entry point is `src/main.py`. Detailed scale, anti-bot, storage, and production design decisions are documented in [`architecture.md`](./architecture.md).
@@ -68,7 +68,7 @@ src/
 ├── resolver/                       Canonical-name resolution
 └── export/
     ├── csv_tabs.py                 Spreadsheet-ready CSV generation
-    └── to_sheets.py                Optional Google Sheets exporter
+       └── to_sheets.py                CSV export for Google Sheets import
 
 tests/test_pipeline.py              Focused regression tests
 ```
@@ -79,7 +79,7 @@ tests/test_pipeline.py              Focused regression tests
 
 Collectors accept explicitly configured source URLs and retain provenance on every record. Product directories use offset pagination and stop at the configured target or an empty or duplicate page. Job collection supports public JSON/RSS sources and pagination where available.
 
-News and jobs are parsed through `src/scrapers/news_jobs.py`. Relative dates and standard ISO/RFC dates are normalized to UTC. Jobs are accepted only within the assignment's 24-hour freshness window.
+News and jobs are parsed through `src/scrapers/news_jobs.py`. Relative dates and standard ISO/RFC dates are normalized to UTC. Jobs and news are accepted only within the assignment's 24-hour freshness window. News records keep the RSS description as a fallback and, when it is missing, fetch the article URL and extract conservative main-content text.
 
 ### 2. Validate and enrich
 
@@ -212,7 +212,10 @@ The repository currently uses local SQLite, JSONL, and CSV. Distributed queues, 
 - Public sources can change formats or block automated requests with Cloudflare or other anti-bot controls. Collectors report failures and continue where possible.
 - Papers with Code may redirect or be unreachable. Papers are still collected, but GitHub fields remain empty when no verified repository is found.
 - LLM enrichment requires configured API keys and can be slow because requests are rate-limited. It is optional and can be disabled.
-- Not every product source exposes a pricing model, and not every job source exposes remote status or location. These fields remain empty when evidence is absent.
+- Product pricing is enriched only for missing values and is normalized to the supported vocabulary; sources and models that provide no explicit evidence remain empty.
+- Article pages can reject automated requests or use layouts that the lightweight extractor cannot identify. In those cases the RSS description is retained, or summary remains empty when no description exists.
+- Papers with Code and GitHub APIs are rate-limited or can be unavailable. Repository links and star counts remain empty when no official mapping or verified GitHub response is available.
+- Individual job boards can change JSON/XML field names or block requests. Each configured source logs its page count and parsed record count so an empty board is visible rather than silently treated as successful.
 - The default local process is not a distributed 500k-record deployment; the production changes are documented in `architecture.md`.
 
 ## Engineering Notes

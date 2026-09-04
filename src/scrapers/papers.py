@@ -54,23 +54,26 @@ def _github_url(value: object) -> str | None:
     if not isinstance(value, str):
         return None
     match = GITHUB_PATTERN.search(value)
-    return match.group(0).rstrip(".,)/") if match else None
+    return match.group(0).rstrip(".,)/").removesuffix(".git") if match else None
+
+
+def _repository_values(value: object) -> list[tuple[str, int | None]]:
+    if isinstance(value, dict):
+        direct_url = _github_url(value.get("url") or value.get("repository_url") or value.get("github_url"))
+        if direct_url:
+            stars = value.get("stars")
+            if not isinstance(stars, int):
+                stars = value.get("stargazers_count")
+            yield direct_url, stars if isinstance(stars, int) else None
+        for nested in value.values():
+            yield from _repository_values(nested)
+    elif isinstance(value, list):
+        for nested in value:
+            yield from _repository_values(nested)
 
 
 def _pwc_repository(payload: object) -> tuple[str, int | None] | None:
-    if not isinstance(payload, dict):
-        return None
-    repositories = payload.get("results") if isinstance(payload.get("results"), list) else payload.get("repositories")
-    if not isinstance(repositories, list):
-        return None
-    for repository in repositories:
-        if not isinstance(repository, dict):
-            continue
-        url = _github_url(repository.get("url") or repository.get("repository_url") or repository.get("github_url"))
-        if url:
-            stars = repository.get("stars") or repository.get("stargazers_count")
-            return url, stars if isinstance(stars, int) else None
-    return None
+    return next(_repository_values(payload), None)
 
 
 async def enrich_github_data(

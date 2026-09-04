@@ -11,7 +11,7 @@ from .orchestrator import ExtractionError, LLMOrchestrator
 from .http_providers import providers_from_environment
 
 ENRICHMENT_DELAY_SECONDS = 0.4
-PRICING_MODELS = {"FREE", "FREEMIUM", "PAID", "ENTERPRISE"}
+PRICING_MODELS = {"FREE", "FREEMIUM", "PAID", "SUBSCRIPTION", "USAGE_BASED", "ENTERPRISE", "OPEN_SOURCE", "UNKNOWN"}
 
 
 def _source_text(record: Startup | Product) -> str:
@@ -33,7 +33,7 @@ def _instruction(record: Startup | Product) -> str:
     if isinstance(record, Startup):
         fields = "description (short factual company description), employee_count (non-negative integer), headquarters (city and/or country)"
     else:
-        fields = "company (company name), pricing_model (one of FREE, FREEMIUM, PAID, ENTERPRISE)"
+        fields = "company (company name), pricing_model (one of free, freemium, subscription, usage-based, enterprise, open-source, unknown)"
     return (
         "Extract only the following missing structured fields from the source text: " + fields + ". "
         "Return a single JSON object with exactly these keys. Use null when a value is absent, ambiguous, or not explicitly supported. "
@@ -45,7 +45,10 @@ def _usable_value(record: Startup | Product, field: str, value: Any) -> Any:
     if field == "employee_count":
         return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
     if field == "pricing_model":
-        return value if isinstance(value, str) and value.upper() in PRICING_MODELS else None
+        if not isinstance(value, str):
+            return None
+        normalized = value.strip().upper().replace("-", "_").replace(" ", "_")
+        return normalized if normalized in PRICING_MODELS else None
     if field in {"description", "headquarters", "company"}:
         return value.strip() if isinstance(value, str) and value.strip() else None
     return None

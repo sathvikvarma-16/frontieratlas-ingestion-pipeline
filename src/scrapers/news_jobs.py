@@ -33,6 +33,55 @@ JOB_PAGE_DELAY_SECONDS = 0.4
 JOB_FRESHNESS_HOURS = 24
 
 
+class _MainTextParser:
+    _CONTENT_TAGS = {"article", "main"}
+    _SKIP_TAGS = {"script", "style", "nav", "header", "footer", "aside", "form", "noscript"}
+
+    def __init__(self) -> None:
+        from html.parser import HTMLParser
+
+        class Parser(HTMLParser):
+            def __init__(self, owner: "_MainTextParser") -> None:
+                super().__init__()
+                self.owner = owner
+                self.depth = 0
+                self.skip_depth = 0
+
+            def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+                self.depth += 1
+                attributes = dict(attrs)
+                if tag in self.owner._SKIP_TAGS or attributes.get("aria-hidden") == "true":
+                    self.skip_depth = self.depth
+                if tag in self.owner._CONTENT_TAGS or attributes.get("role") == "main":
+                    self.owner.content_depth = min(self.owner.content_depth or self.depth, self.depth)
+
+            def handle_endtag(self, tag: str) -> None:
+                if self.skip_depth == self.depth:
+                    self.skip_depth = 0
+                self.depth = max(0, self.depth - 1)
+
+            def handle_data(self, data: str) -> None:
+                if self.skip_depth or not data.strip():
+                    return
+                text = " ".join(data.split())
+                if text:
+                    self.owner.parts.append((self.depth, text))
+
+        self._parser = Parser(self)
+        self.parts: list[tuple[int, str]] = []
+        self.content_depth = 0
+
+    def feed(self, html: str) -> str | None:
+        self._parser.feed(html)
+        parts = [text for depth, text in self.parts if not self.content_depth or depth >= self.content_depth]
+        text = " ".join(dict.fromkeys(parts))
+        return text[:10000] or None
+
+
+def _article_text(html: str) -> str | None:
+    return _MainTextParser().feed(html)
+
+
 def _date(value: str | None, now: datetime) -> datetime | None:
     if not value:
         return None
@@ -98,6 +147,21 @@ def _json_items(payload: object) -> list[dict[str, object]]:
     return []
 
 
+def _xml_value(entry: ET.Element, names: set[str]) -> str | None:
+    for node in entry.iter():
+        local_name = node.tag.rsplit("}", 1)[-1]
+        if local_name in names and node.text:
+            return node.text
+    return None
+
+
+def _company_from_job_url(link: str | None) -> str | None:
+    if not link:
+        return None
+    match = re.search(r"/companies/([^/]+)/jobs/", link, re.I)
+    return match.group(1).replace("-", " ") if match else None
+
+
 def _json_job(item: dict[str, object], source_url: str, *, now: datetime) -> dict[str, object] | None:
     title = _clean(item.get("title") or item.get("position"))
     link = _clean(item.get("url") or item.get("link") or item.get("apply_url"))
@@ -114,7 +178,7 @@ def _json_job(item: dict[str, object], source_url: str, *, now: datetime) -> dic
     return {"title": title, "url": link, "published_at": published.isoformat(), "source_url": source_url,
             "company": _clean(company_value), "location": location,
             "is_remote": _remote_value(item.get("remote") or item.get("remote_ok"), f"{location or ''} {description}"),
-            "role_family": _role_family(title)}
+            "role_family": _role_family(title), "summary": description or None}
 
 
 def _job_page_urls(url: str, *, max_pages: int = 10) -> list[str]:
@@ -157,15 +221,15 @@ def parse_feed(xml: str, source_url: str, *, now: datetime | None = None, freshn
         date_value = next((value for tag in (f"{{{ATOM}}}published", f"{{{ATOM}}}updated", "pubDate", "published") if (value := entry.findtext(tag))), None)
         published = _date(date_value, current)
         description = _clean(entry.findtext(f"{{{RSS}}}encoded") or entry.findtext("description") or entry.findtext(f"{{{ATOM}}}summary")) or ""
-        company = _clean(entry.findtext("{https://jobicy.com}company") or entry.findtext("{https://himalayas.app/ns/jobs}company") or entry.findtext("{http://purl.org/dc/elements/1.1/}creator"))
-        location = _clean(entry.findtext("{https://jobicy.com}job_listing_location") or entry.findtext("{https://himalayas.app/ns/jobs}location"))
+        company = _clean(_xml_value(entry, {"company", "creator", "author"})) or _company_from_job_url(link)
+        location = _clean(_xml_value(entry, {"location", "job_listing_location", "jobLocation"}))
         if title and link and is_fresh(published, now=current, hours=freshness_hours):
             if not company and ":" in title:
                 company, title = (part.strip() for part in title.split(":", 1))
             detail = f"{title} {description} {location or ''}"
             records.append({"title": title, "url": link, "published_at": published.isoformat(), "source_url": source_url,
                             "company": company, "location": location or ("Remote" if _remote_value(None, detail) else None),
-                            "is_remote": _remote_value(None, detail), "role_family": _role_family(title)})
+                            "is_remote": _remote_value(None, detail), "role_family": _role_family(title), "summary": description or None})
     return records
 
 
@@ -174,7 +238,7 @@ def parse_typed_feed(xml: str, source_url: str, *, record_type: str, now: dateti
     records: list[NewsArticle | Job] = []
     for item in parse_feed(xml, source_url, now=now, freshness_hours=freshness_hours):
         if record_type == "news":
-            records.append(NewsArticle(title=item["title"], published_at=item["published_at"], article_url=item["url"], source_url=source_url))
+            records.append(NewsArticle(title=item["title"], summary=item.get("summary"), published_at=item["published_at"], article_url=item["url"], source_url=source_url))
         else:
             records.append(Job(title=item["title"], company=item.get("company"), location=item.get("location"), posted_at=item["published_at"], application_url=item["url"], source_url=source_url, is_remote=item.get("is_remote"), role_family=item.get("role_family")))
     return records
@@ -218,6 +282,15 @@ async def collect_typed(feed_urls: list[str], *, record_type: str, now: datetime
                     if record_url not in seen_urls:
                         seen_urls.add(record_url)
                         unique_records.append(record)
+                if record_type == "news":
+                    for record in unique_records:
+                        if not isinstance(record, NewsArticle) or record.summary:
+                            continue
+                        try:
+                            article_html = await fetch_text(session, str(record.article_url))
+                            record.summary = _article_text(article_html) or record.summary
+                        except (aiohttp.ClientError, TimeoutError):
+                            pass
                 records.extend(unique_records)
                 source_total += len(unique_records)
                 print(f"{record_type.title()} source {source_url} page {page_number}: {len(unique_records)} records; running total {len(records)}")

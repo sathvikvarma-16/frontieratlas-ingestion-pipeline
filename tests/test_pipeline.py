@@ -9,7 +9,7 @@ from src.database import RecordStore
 from src.llm.chunking import chunk_text
 from src.resolver import EntityResolver
 from src.scrapers.freshness import is_fresh, parse_relative_date
-from src.scrapers.news_jobs import parse_feed, parse_typed_feed
+from src.scrapers.news_jobs import _article_text, parse_feed, parse_typed_feed
 from src.scrapers.papers import _arxiv_id, _pwc_repository
 from src.scrapers.startups import parse_directory_pages
 from src.llm.entity_enrichment import enrich_entities
@@ -46,11 +46,33 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual((json_job.company, json_job.location, json_job.role_family), ("Beta", "United States", "Product"))
         self.assertTrue(json_job.is_remote)
 
+        himalayas = """<rss xmlns:job="https://himalayas.app/ns/jobs"><channel><item>
+            <title>Senior Engineer</title><link>https://himalayas.app/companies/acme-ai/jobs/senior-engineer</link>
+            <pubDate>Fri, 04 Sep 2026 11:00:00 GMT</pubDate><job:location>United States</job:location>
+        </item></channel></rss>"""
+        himalayas_job = parse_typed_feed(himalayas, "https://himalayas.app/jobs/rss", record_type="job", now=now)[0]
+        self.assertEqual((himalayas_job.company, himalayas_job.location), ("acme ai", "United States"))
+
+    def test_news_summary_uses_feed_description_and_article_text_helper(self) -> None:
+        now = datetime(2026, 9, 4, 12, tzinfo=timezone.utc)
+        xml = """<rss><channel><item>
+            <title>AI update</title><link>https://example.com/a</link>
+            <pubDate>Fri, 04 Sep 2026 11:00:00 GMT</pubDate>
+            <description>Feed summary.</description>
+        </item></channel></rss>"""
+        article = parse_typed_feed(xml, "https://example.com/feed", record_type="news", now=now)[0]
+        self.assertEqual(article.summary, "Feed summary.")
+        self.assertIn("Main article text", _article_text("<nav>Menu</nav><main><p>Main article text.</p></main>") or "")
+
     def test_paper_repository_lookup_helpers(self) -> None:
         self.assertEqual(_arxiv_id("https://arxiv.org/abs/1706.03762"), "1706.03762")
         self.assertEqual(
             _pwc_repository({"results": [{"url": "https://github.com/google-research/bert", "stars": 42000}]}),
             ("https://github.com/google-research/bert", 42000),
+        )
+        self.assertEqual(
+            _pwc_repository({"results": [{"repository": {"repository_url": "https://github.com/org/model"}}]}),
+            ("https://github.com/org/model", None),
         )
 
     def test_optional_llm_enrichment_fills_missing_fields(self) -> None:
@@ -70,6 +92,14 @@ class PipelineTests(unittest.TestCase):
         with patch.dict("os.environ", {"LLM_ENRICHMENT_ENABLED": "true"}):
             asyncio.run(enrich_entities([product], orchestrator=LLMOrchestrator([CallableProvider("test", extract_product)]), delay_seconds=0))
         self.assertEqual((product.company, product.pricing_model), ("Acme Corp", "PAID"))
+
+        product.pricing_model = None
+        async def extract_subscription(_: str) -> dict[str, object]:
+            return {"pricing_model": "usage-based"}
+
+        with patch.dict("os.environ", {"LLM_ENRICHMENT_ENABLED": "true"}):
+            asyncio.run(enrich_entities([product], orchestrator=LLMOrchestrator([CallableProvider("test", extract_subscription)]), delay_seconds=0))
+        self.assertEqual(product.pricing_model, "USAGE_BASED")
 
     def test_resolver_and_chunks(self) -> None:
         self.assertEqual(EntityResolver(["OpenAI"]).resolve("Open AI, Inc.").canonical_name, "OpenAI")
