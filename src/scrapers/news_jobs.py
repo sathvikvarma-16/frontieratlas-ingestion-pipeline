@@ -80,7 +80,7 @@ class _MainTextParser:
 
 def _article_text(html: str) -> str | None:
     try:
-        import trafilatura
+        import trafilatura  # type: ignore[import-not-found]
         extracted = trafilatura.extract(html, include_comments=False, include_tables=False)
         if extracted:
             return " ".join(extracted.split())[:10000]
@@ -176,7 +176,7 @@ def _json_job(item: dict[str, object], source_url: str, *, now: datetime) -> dic
         return None
     date_value = _clean(item.get("date") or item.get("publication_date") or item.get("created_at") or item.get("posted_at"))
     published = _date(date_value, now)
-    if not is_fresh(published, now=now, hours=JOB_FRESHNESS_HOURS):
+    if published is None or not is_fresh(published, now=now, hours=JOB_FRESHNESS_HOURS):
         return None
     company_value = item.get("company") or item.get("company_name") or item.get("organization")
     location_value = item.get("location") or item.get("job_geo") or item.get("candidate_required_location")
@@ -230,7 +230,7 @@ def parse_feed(xml: str, source_url: str, *, now: datetime | None = None, freshn
         description = _clean(entry.findtext(f"{{{RSS}}}encoded") or entry.findtext("description") or entry.findtext(f"{{{ATOM}}}summary")) or ""
         company = _clean(_xml_value(entry, {"company", "creator", "author"})) or _company_from_job_url(link)
         location = _clean(_xml_value(entry, {"location", "job_listing_location", "jobLocation"}))
-        if title and link and is_fresh(published, now=current, hours=freshness_hours):
+        if title and link and published is not None and is_fresh(published, now=current, hours=freshness_hours):
             if not company and ":" in title:
                 company, title = (part.strip() for part in title.split(":", 1))
             detail = f"{title} {description} {location or ''}"
@@ -245,16 +245,16 @@ def parse_typed_feed(xml: str, source_url: str, *, record_type: str, now: dateti
     records: list[NewsArticle | Job] = []
     for item in parse_feed(xml, source_url, now=now, freshness_hours=freshness_hours):
         if record_type == "news":
-            records.append(NewsArticle(title=item["title"], summary=item.get("summary"), published_at=item["published_at"], article_url=item["url"], source_url=source_url))
+            records.append(NewsArticle.model_validate({"title": item["title"], "summary": item.get("summary"), "published_at": item["published_at"], "article_url": item["url"], "source_url": source_url}))
         else:
-            records.append(Job(title=item["title"], company=item.get("company"), location=item.get("location"), posted_at=item["published_at"], application_url=item["url"], source_url=source_url, is_remote=item.get("is_remote"), role_family=item.get("role_family")))
+            records.append(Job.model_validate({"title": item["title"], "company": item.get("company"), "location": item.get("location"), "posted_at": item["published_at"], "application_url": item["url"], "source_url": source_url, "is_remote": item.get("is_remote"), "role_family": item.get("role_family")}))
     return records
 
 
-async def collect(feed_urls: list[str], *, now: datetime | None = None) -> list[dict[str, str]]:
+async def collect(feed_urls: list[str], *, now: datetime | None = None) -> list[dict[str, object]]:
     async with aiohttp.ClientSession(headers={"User-Agent": "FrontierAtlas/0.1"}) as session:
         results = await asyncio.gather(*(fetch_text(session, url) for url in feed_urls), return_exceptions=True)
-    records: list[dict[str, str]] = []
+    records: list[dict[str, object]] = []
     for url, result in zip(feed_urls, results):
         if isinstance(result, str):
             try:
@@ -296,7 +296,9 @@ async def collect_typed(feed_urls: list[str], *, record_type: str, now: datetime
                         async with semaphore:
                             try:
                                 article_html = await fetch_text(session, str(record.article_url), headers={"User-Agent": "FrontierAtlas/1.0"})
-                                record.summary = _article_text(article_html) or record.summary
+                                extracted = _article_text(article_html)
+                                if extracted and len(extracted) > len(record.summary or ""):
+                                    record.summary = extracted
                             except (aiohttp.ClientError, TimeoutError):
                                 return
 
