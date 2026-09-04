@@ -8,6 +8,10 @@ from typing import Any
 from src.resolver import EntityResolver, load_canonical_seeds
 
 
+def _csv_row(row: dict[str, Any]) -> dict[str, Any]:
+    return {key: value.replace("\r", " ").replace("\n", " ") if isinstance(value, str) else value for key, value in row.items()}
+
+
 def export_tabs(input_path: str, output_dir: str = "data/tabs") -> int:
     with Path(input_path).open(encoding="utf-8") as source:
         rows = [json.loads(line) for line in source if line.strip()]
@@ -23,7 +27,7 @@ def export_tabs(input_path: str, output_dir: str = "data/tabs") -> int:
         with (destination / f"{filename}.csv").open("w", newline="", encoding="utf-8") as output:
             writer = csv.DictWriter(output, fieldnames=keys)
             writer.writeheader()
-            writer.writerows(selected)
+            writer.writerows(_csv_row(row) for row in selected)
         count += len(selected)
     entities = [row for row in rows if row.get("recordType") in {"STARTUP", "PRODUCT"} and row.get("name")]
     if entities:

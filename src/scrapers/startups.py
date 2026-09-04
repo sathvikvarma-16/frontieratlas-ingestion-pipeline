@@ -62,10 +62,18 @@ def parse_directory_pages(pages: dict[str, str], *, entity_type: str) -> list[St
             for entry in entries:
                 if not isinstance(entry, dict) or not entry.get("name"):
                     continue
-                common = {"name": entry["name"], "description": entry.get("description") or entry.get("tagline"), "website": entry.get("website") or entry.get("url")}
+                common = {
+                    "name": entry["name"],
+                    "description": entry.get("description") or entry.get("long_description") or entry.get("one_liner") or entry.get("tagline"),
+                    "website": entry.get("website") or entry.get("url"),
+                }
                 source = Source(name=entry.get("source_name", "configured-directory"), url=url)
                 try:
-                    records.append(Startup(source=source, **common) if entity_type == "startup" else Product(source=source, company=entry.get("company"), pricing_model=entry.get("pricing_model"), **common))
+                    if entity_type == "startup":
+                        location = entry.get("headquarters") or entry.get("all_locations") or entry.get("location")
+                        records.append(Startup(source=source, headquarters=location, employee_count=entry.get("employee_count") or entry.get("team_size"), **common))
+                    else:
+                        records.append(Product(source=source, company=entry.get("company") or entry.get("maker"), pricing_model=entry.get("pricing_model"), **common))
                 except ValueError:
                     continue
             continue
@@ -100,6 +108,7 @@ async def collect_products(
 ) -> list[Product]:
     """Fetch product directory APIs page by page until the target is reached."""
     products: list[Product] = []
+    seen: set[tuple[str, str]] = set()
     async with aiohttp.ClientSession(headers={"User-Agent": "FrontierAtlas/1.0"}) as session:
         for source_url in urls:
             offset = 0
@@ -113,7 +122,16 @@ async def collect_products(
                     print(f"Products page {page_number}: empty page; have {len(products)} products")
                     break
 
-                products.extend(page_products)
+                unique_page_products = []
+                for product in page_products:
+                    key = (product.name.casefold(), str(product.website or ""))
+                    if key not in seen:
+                        seen.add(key)
+                        unique_page_products.append(product)
+                if not unique_page_products:
+                    print(f"Products page {page_number}: duplicate page; have {len(products)} products")
+                    break
+                products.extend(unique_page_products)
                 print(f"Products page {page_number}: have {len(products)} products so far")
                 if len(products) >= target:
                     break

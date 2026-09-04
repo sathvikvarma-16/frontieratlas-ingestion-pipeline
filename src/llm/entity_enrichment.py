@@ -1,6 +1,7 @@
 """Optional LLM enrichment for scraped startup and product records."""
 
 import asyncio
+import os
 from collections.abc import Sequence
 from typing import Any
 
@@ -57,6 +58,9 @@ async def enrich_entities(
     delay_seconds: float = ENRICHMENT_DELAY_SECONDS,
 ) -> list[Startup | Product]:
     """Fill missing entity fields through the configured provider fallback chain."""
+    if os.getenv("LLM_ENRICHMENT_ENABLED", "true").lower() not in {"1", "true", "yes"}:
+        print("LLM enrichment skipped: disabled by LLM_ENRICHMENT_ENABLED")
+        return list(records)
     providers = providers_from_environment() if orchestrator is None else orchestrator.providers
     if not providers:
         print("LLM enrichment skipped: no provider API keys configured")

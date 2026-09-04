@@ -96,6 +96,8 @@ python -m pip install -r requirements.txt
 Copy-Item .env.example .env
 python -m unittest discover -s tests -v
 python -m src.main
+$env:LLM_ENRICHMENT_ENABLED='false'; python -m src.refresh_submission --output data/submission_records.jsonl --papers data/papers.jsonl
+python -c "from src.export.csv_tabs import export_tabs; print(export_tabs('data/submission_records.jsonl'))"
 python -m src.main --papers 100 --output data/papers.jsonl
 python -m src.export.to_sheets data/papers.jsonl --output-dir data/tabs
 python -m src.scrapers.startups https://your-approved-directory.example/feed.json --type startup --output data/startups.jsonl

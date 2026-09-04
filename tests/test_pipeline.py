@@ -1,5 +1,6 @@
 import unittest
 import asyncio
+from unittest.mock import patch
 from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -58,14 +59,16 @@ class PipelineTests(unittest.TestCase):
 
         startup = Startup(name="Acme", description="Existing description", source=Source(name="test", url="https://example.com"))
         orchestrator = LLMOrchestrator([CallableProvider("test", extract)])
-        asyncio.run(enrich_entities([startup], orchestrator=orchestrator, delay_seconds=0))
+        with patch.dict("os.environ", {"LLM_ENRICHMENT_ENABLED": "true"}):
+            asyncio.run(enrich_entities([startup], orchestrator=orchestrator, delay_seconds=0))
         self.assertEqual((startup.description, startup.employee_count, startup.headquarters), ("Existing description", 12, "London"))
 
         async def extract_product(_: str) -> dict[str, object]:
             return {"company": "Acme Corp", "pricing_model": "PAID"}
 
         product = Product(name="Acme Tool", source=Source(name="test", url="https://example.com"))
-        asyncio.run(enrich_entities([product], orchestrator=LLMOrchestrator([CallableProvider("test", extract_product)]), delay_seconds=0))
+        with patch.dict("os.environ", {"LLM_ENRICHMENT_ENABLED": "true"}):
+            asyncio.run(enrich_entities([product], orchestrator=LLMOrchestrator([CallableProvider("test", extract_product)]), delay_seconds=0))
         self.assertEqual((product.company, product.pricing_model), ("Acme Corp", "PAID"))
 
     def test_resolver_and_chunks(self) -> None:
