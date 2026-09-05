@@ -192,6 +192,8 @@ Mapping Log:      7,191
 
 Field population is source-dependent. Unknown values remain empty by design; the pipeline does not manufacture employee counts, locations, pricing models, repository links, or star counts.
 
+Google Sheets submission: [FrontierAtlas data sheet](https://docs.google.com/spreadsheets/d/1GkZ0vXzD2jHSD-GRabk11k6qJ1pk2tjSZtmHIR8vVjM/edit?usp=sharing)
+
 ## Production Scale
 
 The current repository is a reliable local reference implementation. The path to 500k+ records is described in [`architecture.md`](./architecture.md) and includes:
