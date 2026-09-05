@@ -94,7 +94,7 @@ Source adapters produce immutable raw records containing the original URL and fe
 
 Each domain has a rate limiter and bounded `aiohttp` concurrency. A partitioned queue (source and crawl date) allows workers to scale horizontally without code changes. Retries use exponential backoff with jitter for 429, 408, and transient 5xx responses; permanent 4xx responses are dead-lettered with the URL and response metadata.
 
-For LLM calls, the orchestrator sends semantically ordered chunks below the smallest provider limit. A provider circuit breaker routes failures through Gemini Flash, Groq Llama, and DeepSeek. Per-provider token buckets, `Retry-After` support, and idempotency keys prevent retry storms. A 413 causes a smaller chunk retry; it never causes silent truncation.
+For LLM calls, the orchestrator sends each source through bounded chunks and tries Gemini Flash, Groq, and DeepSeek in order when a provider fails. The HTTP client retries 429 and 5xx responses with exponential backoff and jitter. Oversized source text is chunked before requests; a provider-side 413 is reported as a failed provider attempt rather than retried with a smaller chunk.
 
 ## Freshness and deduplication
 

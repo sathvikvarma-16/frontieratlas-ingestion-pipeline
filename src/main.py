@@ -11,7 +11,7 @@ from src.resolver import EntityResolver
 from src.scrapers.news_jobs import JOB_FEED_URLS, collect_typed as collect_signals
 from src.scrapers.papers import collect as collect_papers
 from src.scrapers.startups import collect as collect_entities, collect_products
-from src.storage import append_records
+from src.storage import write_records
 
 
 async def run(limit: int = 0, output: str = "data/papers.jsonl") -> None:
@@ -36,7 +36,7 @@ async def run(limit: int = 0, output: str = "data/papers.jsonl") -> None:
     if not records:
         print("No sources configured; no records were generated")
         return
-    append_records(output, records)
+    write_records(output, records)
     store = RecordStore()
     for record in records:
         payload = record.model_dump(mode="json") if hasattr(record, "model_dump") else record

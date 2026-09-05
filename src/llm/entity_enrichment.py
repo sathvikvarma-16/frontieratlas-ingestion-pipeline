@@ -57,12 +57,12 @@ def _usable_value(record: Startup | Product, field: str, value: Any) -> Any:
 
 
 async def enrich_entities(
-    records: Sequence[Startup | Product],
-    *,
-    orchestrator: LLMOrchestrator | None = None,
-    source_texts: dict[str, str] | None = None,
-    delay_seconds: float = ENRICHMENT_DELAY_SECONDS,
-) -> list[Startup | Product]:
+        records: Sequence[Startup | Product],
+        *,
+        orchestrator: LLMOrchestrator | None = None,
+        source_texts: dict[str, str] | None = None,
+        delay_seconds: float = ENRICHMENT_DELAY_SECONDS,
+    ) -> list[Startup | Product]:
     """Fill missing entity fields through the configured provider fallback chain."""
     if os.getenv("LLM_ENRICHMENT_ENABLED", "true").lower() not in {"1", "true", "yes"}:
         print("LLM enrichment skipped: disabled by LLM_ENRICHMENT_ENABLED")
