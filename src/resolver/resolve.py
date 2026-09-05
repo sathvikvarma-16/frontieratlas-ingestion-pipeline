@@ -52,7 +52,7 @@ class Resolution:
 
 
 class EntityResolver:
-    def __init__(self, canonical_names: list[str], *, threshold: float = 90) -> None:
+    def __init__(self, canonical_names: list[str], *, threshold: float = 95) -> None:
         self.canonical_names = canonical_names
         self.threshold = threshold
 
@@ -65,6 +65,10 @@ class EntityResolver:
         if not raw_name.strip() or not self.canonical_names:
             return Resolution(raw_name, None, 0)
         normalized = self.normalize(raw_name)
+        compact = normalized.replace(" ", "")
+        for name in self.canonical_names:
+            if compact == self.normalize(name).replace(" ", ""):
+                return Resolution(raw_name, name, 100)
         best_name, best_score = max(
             ((name, WRatio(normalized, self.normalize(name))) for name in self.canonical_names),
             key=lambda item: item[1],

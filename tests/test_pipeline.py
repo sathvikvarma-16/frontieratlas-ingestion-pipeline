@@ -104,6 +104,8 @@ class PipelineTests(unittest.TestCase):
 
     def test_resolver_and_chunks(self) -> None:
         self.assertEqual(EntityResolver(["OpenAI"]).resolve("Open AI, Inc.").canonical_name, "OpenAI")
+        self.assertIsNone(EntityResolver(["OpenAI", "Midjourney"]).resolve("Open").canonical_name)
+        self.assertIsNone(EntityResolver(["OpenAI", "Midjourney"]).resolve("jo").canonical_name)
         self.assertEqual("".join(chunk_text("abcdefghij", 3)), "abcdefghij")
 
     def test_store_is_idempotent(self) -> None:
