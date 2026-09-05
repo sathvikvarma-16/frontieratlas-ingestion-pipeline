@@ -8,6 +8,7 @@ import argparse
 import asyncio
 import json
 import os
+import re
 from collections.abc import Iterable
 from html.parser import HTMLParser
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -23,6 +24,23 @@ from .base import fetch_many, fetch_text
 PRODUCT_TARGET = 1000
 PRODUCT_PAGE_SIZE = 100
 PRODUCT_PAGE_DELAY_SECONDS = 0.4
+
+
+def _pricing_model(*values: object) -> str | None:
+    """Normalize only explicit pricing labels or prices supplied by a source."""
+    text = " ".join(str(value) for value in values if value not in (None, "")).strip()
+    if not text:
+        return None
+    normalized = text.upper().replace("-", "_").replace(" ", "_")
+    for model in ("FREEMIUM", "ENTERPRISE", "FREE", "PAID"):
+        if model in normalized:
+            return model
+    lowered = text.lower()
+    if re.search(r"(?:\$|€|£)\s*\d|\b\d+(?:\.\d+)?\s*(?:usd|eur|gbp)\b|\bpaid\s+(?:plan|subscription|service)\b", lowered):
+        return "PAID"
+    if re.search(r"\b(?:free\s+(?:plan|tier|forever|tool|app)|for\s+free|free\s+to\s+(?:use|try))\b", lowered):
+        return "FREE"
+    return None
 
 
 class MetadataParser(HTMLParser):
@@ -74,7 +92,12 @@ def parse_directory_pages(pages: dict[str, str], *, entity_type: str) -> list[St
                         location = entry.get("headquarters") or entry.get("all_locations") or entry.get("location")
                         records.append(Startup(source=source, headquarters=location, employee_count=entry.get("employee_count") or entry.get("team_size"), **common))
                     else:
-                        records.append(Product(source=source, company=entry.get("company") or entry.get("maker"), pricing_model=entry.get("pricing_model"), **common))
+                        records.append(Product(
+                            source=source,
+                            company=entry.get("company") or entry.get("maker"),
+                            pricing_model=_pricing_model(entry.get("pricing_model"), entry.get("pricing"), entry.get("price"), common["description"]),
+                            **common,
+                        ))
                 except ValueError:
                     continue
             continue

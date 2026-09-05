@@ -122,6 +122,11 @@ class PipelineTests(unittest.TestCase):
         records = parse_directory_pages(pages, entity_type="startup")
         self.assertEqual([record.name for record in records], ["Acme AI", "Beta Labs"])
 
+    def test_product_pricing_requires_explicit_evidence(self) -> None:
+        pages = {"https://example.com/products.json": "[{\"name\":\"Free Tool\",\"description\":\"Use it for free\"},{\"name\":\"Paid Tool\",\"description\":\"Pricing: Freemium (starter $9.99)\"},{\"name\":\"Unknown Tool\",\"description\":\"Built for product teams\"}]"}
+        records = parse_directory_pages(pages, entity_type="product")
+        self.assertEqual([record.pricing_model for record in records], ["FREE", "FREEMIUM", None])
+
 
 if __name__ == "__main__":
     unittest.main()

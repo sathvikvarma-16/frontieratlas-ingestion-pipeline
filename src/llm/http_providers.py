@@ -33,7 +33,7 @@ class HTTPProvider:
 
 
 class GeminiProvider(HTTPProvider):
-    def __init__(self, api_key: str, model: str = "gemini-2.0-flash") -> None:
+    def __init__(self, api_key: str, model: str = "gemini-2.5-flash") -> None:
         super().__init__("gemini", "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", api_key, model)
 
 
@@ -43,7 +43,7 @@ def providers_from_environment() -> list[HTTPProvider]:
     if os.getenv("GEMINI_API_KEY"):
         configured.append(GeminiProvider(os.environ["GEMINI_API_KEY"]))
     if os.getenv("GROQ_API_KEY"):
-        configured.append(HTTPProvider("groq", "https://api.groq.com/openai/v1/chat/completions", os.environ["GROQ_API_KEY"], "llama-3.1-8b-instant"))
+        configured.append(HTTPProvider("groq", "https://api.groq.com/openai/v1/chat/completions", os.environ["GROQ_API_KEY"], os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")))
     if os.getenv("DEEPSEEK_API_KEY"):
         configured.append(HTTPProvider("deepseek", "https://api.deepseek.com/chat/completions", os.environ["DEEPSEEK_API_KEY"], "deepseek-chat"))
     return configured
