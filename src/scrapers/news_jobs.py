@@ -30,6 +30,7 @@ JOB_FEED_URLS = [
 ]
 JOB_PAGE_SIZE = 100
 JOB_PAGE_DELAY_SECONDS = 0.4
+NEWS_ARTICLE_DELAY_SECONDS = 0.2
 JOB_FRESHNESS_HOURS = 24
 
 
@@ -297,10 +298,15 @@ async def collect_typed(feed_urls: list[str], *, record_type: str, now: datetime
                             try:
                                 article_html = await fetch_text(session, str(record.article_url), headers={"User-Agent": "FrontierAtlas/1.0"})
                                 extracted = _article_text(article_html)
-                                if extracted and len(extracted) > len(record.summary or ""):
+                                if extracted:
                                     record.summary = extracted
-                            except (aiohttp.ClientError, TimeoutError):
-                                return
+                                    print(f"News article fetched: {record.article_url}")
+                                else:
+                                    print(f"News article has no extractable body: {record.article_url}")
+                            except (aiohttp.ClientError, TimeoutError, RuntimeError) as error:
+                                print(f"News article fetch failed: {record.article_url} ({error})")
+                            finally:
+                                await asyncio.sleep(NEWS_ARTICLE_DELAY_SECONDS)
 
                     await asyncio.gather(*(enrich_article(record) for record in unique_records if isinstance(record, NewsArticle)))
                 records.extend(unique_records)

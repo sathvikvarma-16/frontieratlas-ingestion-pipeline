@@ -26,7 +26,10 @@ def _text(element: ET.Element | None) -> str:
 
 def _arxiv_id(paper_url: str) -> str | None:
     match = re.search(r"arxiv\.org/(?:abs|pdf)/([\w.-]+)", paper_url, re.I)
-    return match.group(1).removesuffix(".pdf") if match else None
+    if not match:
+        return None
+    identifier = match.group(1).removesuffix(".pdf")
+    return re.sub(r"v\d+$", "", identifier, flags=re.I)
 
 
 def parse_arxiv_feed(xml: str) -> list[ResearchPaper]:
@@ -88,10 +91,12 @@ async def enrich_github_data(
     if token:
         headers["Authorization"] = f"Bearer {token}"
     semaphore = asyncio.Semaphore(10)
+    outcome_counts = {"success": 0, "no-repo-found": 0, "api-error": 0}
 
     async def enrich_one(paper: ResearchPaper) -> bool:
         repository_stars: int | None = None
         identifier = _arxiv_id(str(paper.paper_url))
+        outcome = "no-repo-found"
         try:
             async with semaphore:
                 if identifier and not paper.github_url:
@@ -103,6 +108,8 @@ async def enrich_github_data(
                     repository = _pwc_repository(json.loads(pwc_text))
                     if repository:
                         paper.github_url, repository_stars = repository
+                elif paper.github_url:
+                    outcome = "success"
             github_url = _github_url(str(paper.github_url)) if paper.github_url else None
             if github_url:
                 paper.github_url = github_url
@@ -116,15 +123,21 @@ async def enrich_github_data(
                     repository_stars = json.loads(github_text).get("stargazers_count")
             if paper.github_url:
                 paper.github_stars = repository_stars
+                outcome = "success"
                 return True
-        except (aiohttp.ClientError, TimeoutError):
-            return False
-        except (json.JSONDecodeError, TypeError, ValueError):
-            return False
-        return False
+        except (aiohttp.ClientError, TimeoutError, json.JSONDecodeError, TypeError, ValueError, RuntimeError):
+            outcome = "api-error"
+        finally:
+            outcome_counts[outcome] += 1
+            print(f"Papers with Code {paper.paper_url}: {outcome}")
+        return outcome == "success"
 
     matched = sum(await asyncio.gather(*(enrich_one(paper) for paper in papers)))
-    print(f"GitHub enrichment: {matched}/{len(papers)} papers matched to a repository")
+    print(
+        f"GitHub enrichment: {matched}/{len(papers)} papers matched; "
+        f"success={outcome_counts['success']}, no-repo-found={outcome_counts['no-repo-found']}, "
+        f"api-error={outcome_counts['api-error']}"
+    )
 
 
 async def collect(query: str = "cat:cs.AI", max_results: int = 100) -> list[ResearchPaper]:

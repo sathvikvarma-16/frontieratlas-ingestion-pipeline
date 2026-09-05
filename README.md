@@ -182,12 +182,12 @@ python -m src.scrapers.news_jobs https://approved.example/feed.xml --type job --
 A validated refresh produced the following output sizes:
 
 ```text
-Startups:         6,189
+Startups:         6,191
 Products:         1,000
 Research Papers:  1,000
-Jobs:               619
-News:                22
-Mapping Log:      7,189
+Jobs:               561
+News:                21
+Mapping Log:      7,191
 ```
 
 Field population is source-dependent. Unknown values remain empty by design; the pipeline does not manufacture employee counts, locations, pricing models, repository links, or star counts.

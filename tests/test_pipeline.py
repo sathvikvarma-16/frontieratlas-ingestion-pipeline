@@ -66,6 +66,7 @@ class PipelineTests(unittest.TestCase):
 
     def test_paper_repository_lookup_helpers(self) -> None:
         self.assertEqual(_arxiv_id("https://arxiv.org/abs/1706.03762"), "1706.03762")
+        self.assertEqual(_arxiv_id("http://arxiv.org/abs/2609.04198v1"), "2609.04198")
         self.assertEqual(
             _pwc_repository({"results": [{"url": "https://github.com/google-research/bert", "stars": 42000}]}),
             ("https://github.com/google-research/bert", 42000),

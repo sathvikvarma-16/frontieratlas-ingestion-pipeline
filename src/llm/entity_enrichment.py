@@ -33,10 +33,12 @@ def _instruction(record: Startup | Product) -> str:
     if isinstance(record, Startup):
         fields = "description (short factual company description), employee_count (non-negative integer), headquarters (city and/or country)"
     else:
-        fields = "company (company name), pricing_model (exactly one of FREE, FREEMIUM, PAID, ENTERPRISE)"
+        pricing_values = ", ".join(sorted(PRICING_MODELS))
+        fields = f"company (company name), pricing_model (exactly one of {pricing_values})"
     return (
         "Extract only the following missing structured fields from the source text: " + fields + ". "
         "Return a single JSON object with exactly these keys. Use null when a value is absent, ambiguous, or not explicitly supported. "
+        "For pricing_model, return only the named enum value or null, never free text. "
         "Do not infer, guess, or use outside knowledge. Keep an existing value unchanged."
     )
 
@@ -48,8 +50,7 @@ def _usable_value(record: Startup | Product, field: str, value: Any) -> Any:
         if not isinstance(value, str):
             return None
         normalized = value.strip().upper().replace("-", "_").replace(" ", "_")
-        aliases = {"FREE": "FREE", "FREEMIUM": "FREEMIUM", "PAID": "PAID", "ENTERPRISE": "ENTERPRISE"}
-        return aliases.get(normalized)
+        return normalized if normalized in PRICING_MODELS else None
     if field in {"description", "headquarters", "company"}:
         return value.strip() if isinstance(value, str) and value.strip() else None
     return None
